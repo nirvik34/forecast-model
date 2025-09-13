@@ -1,0 +1,22 @@
+# Ignore the virtual environment folder named "myenv"
+myenv/
+
+# Common Python ignores
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+*.pyc
+
+# Other common environment folders
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+
+# Editor/IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+*.log
