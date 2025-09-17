@@ -18,6 +18,8 @@ from IPython.display import display, clear_output
 df = pd.read_csv('/content/sample_data/2025-grievances.csv')
 df['Grievance Date'] = pd.to_datetime(df['Grievance Date'])
 
+
+
 mask = df['Sub Category'] == 'Street Light Not Working'
 df_sub = df[mask].copy()
 
@@ -261,3 +263,69 @@ plt.show()
 
 print("Final train loss:", history.history['loss'][-1])
 print("Final val loss:", history.history['val_loss'][-1])
+
+from datetime import datetime
+
+print("\n" + "="*50)
+print("Get a Prediction for a Specific Date")
+print("="*50)
+
+def predict_single_date(target_date):
+    target_date = pd.to_datetime(target_date)
+
+    # Find the index for the date *before* the target date to create the input sequence
+    idx_end = daily[daily['date'] == target_date - pd.Timedelta(days=1)].index
+
+    if len(idx_end) == 0:
+        print(f"Error: Data for the day before {target_date.date()} is not available.")
+        return
+
+    idx_end = idx_end[0]
+    idx_start = idx_end - sequence_length + 1
+
+    if idx_start < 0:
+        print(f"Error: Not enough historical data ({sequence_length} days required) before {target_date.date()}.")
+        return
+
+    # Get the last known sequence of features
+    last_seq = X_all[idx_start:idx_end + 1]
+
+    # Scale the sequence and predict
+    last_seq_scaled = feature_scaler.transform(last_seq)
+    pred_scaled = model.predict(last_seq_scaled[np.newaxis, :, :])[0, 0]
+
+    # Inverse transform to get the final count
+    pred_log = target_scaler.inverse_transform([[pred_scaled]])[0, 0]
+    pred_count = np.expm1(pred_log)
+
+    # Display the result in the output area
+    output_area.clear_output()
+    with output_area:
+        print(f"Predicted Complaints for {target_date.date()}: {pred_count:.0f}")
+
+min_date_for_prediction = daily['date'].iloc[sequence_length]
+max_date_for_prediction = daily['date'].iloc[-1] + pd.Timedelta(days=1) # Allow predicting one day ahead
+
+single_date_picker = widgets.DatePicker(
+    description='Select Date',
+    value=max_date_for_prediction,
+    disabled=False
+)
+
+predict_button = widgets.Button(
+    description='Get Prediction',
+    button_style='success',
+    tooltip='Click to get the forecast for the selected date'
+)
+
+# An output widget to display the prediction result cleanly
+output_area = widgets.Output()
+
+def on_button_click(b):
+    predict_single_date(single_date_picker.value)
+
+predict_button.on_click(on_button_click)
+
+# Display the new widgets
+display(widgets.HBox([single_date_picker, predict_button]))
+display(output_area)
