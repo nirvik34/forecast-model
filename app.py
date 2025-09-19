@@ -1,5 +1,6 @@
 # app.py
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
@@ -16,15 +17,48 @@ TF_RANDOM_SEED = 42
 np.random.seed(0)
 tf.random.set_seed(TF_RANDOM_SEED)
 
+# ✅ Load only necessary columns from CSV
 df = pd.read_csv(CSV_PATH, usecols=['Sub Category', 'Grievance Date'])
 df['Grievance Date'] = pd.to_datetime(df['Grievance Date'])
-problem_types = df['Sub Category'].unique().tolist()
+
+# ✅ Hardcoded problem types
+problem_types = [
+    'Street Light Not Working',
+    'Garbage dumping in vacant sites',
+    'Potholes',
+    'Garbage dump',
+    'Others',
+    'water stagnation',
+    'Cleanliness'
+]
+
+# ✅ Keep only rows with selected problem types
+df = df[df['Sub Category'].isin(problem_types)]
 
 app = FastAPI(title="Grievance Forecast API")
+
+origins = [
+    "http://localhost:5173",  # React dev server
+    "http://127.0.0.1:5173",  # Fallback local address
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class PredictionRequest(BaseModel):
     problem: str
     date: str  # YYYY-MM-DD
+
+
+@app.get("/problems")
+def get_problems():
+    return {"problems": problem_types}
+
 
 @app.post("/predict")
 def predict(request: PredictionRequest):
@@ -37,13 +71,15 @@ def predict(request: PredictionRequest):
     # Time series preparation
     mask = df['Sub Category'] == selected_problem
     df_sub = df[mask]
+    if df_sub.empty:
+        return {"error": f"No data available for '{selected_problem}'"}
     daily = df_sub.groupby(df_sub["Grievance Date"].dt.date).size().reset_index(name='count')
     daily['date'] = pd.to_datetime(daily['Grievance Date'])
     daily = daily[['date', 'count']]
     full_range = pd.date_range(daily['date'].min(), daily['date'].max(), freq='D')
     daily = daily.set_index('date').reindex(full_range, fill_value=0).rename_axis('date').reset_index()
 
-    # Features
+    # Feature engineering
     daily['month'] = daily['date'].dt.month
     daily['month_sin'] = np.sin(2 * np.pi * daily['month'] / 12)
     daily['month_cos'] = np.cos(2 * np.pi * daily['month'] / 12)
@@ -81,7 +117,7 @@ def predict(request: PredictionRequest):
     if len(X_seq) < MIN_SAMPLES:
         return {"error": f"Not enough data for {selected_problem}"}
 
-    split = int(0.8*len(X_seq))
+    split = int(0.8 * len(X_seq))
     X_train, X_test = X_seq[:split], X_seq[split:]
     y_train, y_test = y_seq[:split], y_seq[split:]
 
@@ -90,7 +126,7 @@ def predict(request: PredictionRequest):
     X_test_scaled = f_scaler.transform(X_test.reshape(-1, X_test.shape[2])).reshape(X_test.shape)
 
     t_scaler = MinMaxScaler()
-    y_train_scaled = t_scaler.fit_transform(y_train.reshape(-1,1)).flatten()
+    y_train_scaled = t_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
 
     tf.random.set_seed(TF_RANDOM_SEED)
     model = Sequential([
@@ -117,10 +153,11 @@ def predict(request: PredictionRequest):
     fut_preds = []
 
     for _ in range(days_ahead):
-        pred_scaled = model.predict(curr_seq[np.newaxis, :, :], verbose=0)[0,0]
-        pred_log = t_scaler.inverse_transform([[pred_scaled]])[0,0]
+        pred_scaled = model.predict(curr_seq[np.newaxis, :, :], verbose=0)[0, 0]
+        pred_log = t_scaler.inverse_transform([[pred_scaled]])[0, 0]
         pred_count = np.expm1(pred_log)
         fut_preds.append(pred_count)
+
         new_row = curr_seq[-1].copy()
         new_row[0] = pred_count
         new_row[1] = curr_seq[-1][0]
@@ -129,11 +166,12 @@ def predict(request: PredictionRequest):
         last7 = history_counts[-7:]
         new_row[4] = max(last7)
         new_row[5] = sum(last7)
+
         curr_seq = np.roll(curr_seq, -1, axis=0)
         curr_seq[-1] = new_row
 
     return {
         "selected_problem": selected_problem,
         "selected_date": str(sel_date.date()),
-        "predicted_complaints": round(fut_preds[-1],2)
+        "predicted_complaints": round(fut_preds[-1], 2)
     }

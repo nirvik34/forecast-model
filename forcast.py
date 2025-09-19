@@ -11,13 +11,12 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
-import ipywidgets as widgets
-from IPython.display import display, clear_output
 from tensorflow.keras import Input
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 import tensorflow as tf
+import joblib
 
 """Hyperparameters"""
 
@@ -148,6 +147,9 @@ def issue_forecast(selected_problem, sel_date):
     es = EarlyStopping(patience=10, restore_best_weights=True)
     model.fit(X_train_scaled, y_train_scaled, epochs=60, batch_size=8,
               validation_data=(X_test_scaled, y_test_scaled), callbacks=[es], verbose=0)
+    model.save("/content/sample_data/lstm_model.h5")
+    joblib.dump(f_scaler, "feature_scaler.pkl")
+    joblib.dump(t_scaler, "target_scaler.pkl")
 
     # Forecast horizon = days until selected date
     sel_date = pd.to_datetime(sel_date)
